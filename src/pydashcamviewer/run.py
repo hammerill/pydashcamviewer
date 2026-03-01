@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import argparse
+import bisect
 import datetime
 import struct
 import time
@@ -90,8 +91,25 @@ def extract_coordinates_from_mp4(
     return video_start_epoch, coordinates
 
 
+def downsample_route(route: list[tuple[float, float]], max_points: int = 1200) -> list[tuple[float, float]]:
+    if len(route) <= max_points:
+        return route
+    step = max(1, len(route) // max_points)
+    reduced = route[::step]
+    if reduced[-1] != route[-1]:
+        reduced.append(route[-1])
+    return reduced
+
+
 class OpenCVVideoPlayer(tk.Frame):
-    def __init__(self, master: tk.Misc, video_path: str, on_time_update, on_load_file):
+    def __init__(
+        self,
+        master: tk.Misc,
+        video_path: str,
+        on_time_update,
+        on_load_file,
+        max_fps: float | None = None,
+    ):
         super().__init__(master)
         self.video_path = video_path
         self.on_time_update = on_time_update
@@ -101,13 +119,22 @@ class OpenCVVideoPlayer(tk.Frame):
         if not self.cap.isOpened():
             raise RuntimeError(f"Failed to open video file: {self.video_path}")
 
-        fps = float(self.cap.get(cv2.CAP_PROP_FPS))
-        self.fps = fps if fps > 0 else 30.0
+        source_fps = float(self.cap.get(cv2.CAP_PROP_FPS))
+        if source_fps <= 0:
+            source_fps = 30.0
+
+        if max_fps and max_fps > 0:
+            self.playback_fps = min(source_fps, max_fps)
+        else:
+            self.playback_fps = source_fps
+
+        self.frame_interval_s = 1.0 / self.playback_fps
         self.frame_count = float(self.cap.get(cv2.CAP_PROP_FRAME_COUNT))
-        self.duration_ms = (self.frame_count / self.fps) * 1000.0 if self.frame_count > 0 else 0.0
+        self.duration_ms = (self.frame_count / source_fps) * 1000.0 if self.frame_count > 0 else 0.0
 
         self.playing = False
         self._slider_internal_update = False
+        self._next_frame_deadline = 0.0
 
         self.video_panel = tk.Label(self, bg="black")
         self.video_panel.grid(row=0, column=0, sticky="nsew")
@@ -141,6 +168,7 @@ class OpenCVVideoPlayer(tk.Frame):
     def play(self) -> None:
         if not self.playing:
             self.playing = True
+            self._next_frame_deadline = time.perf_counter()
             self.update_frame()
 
     def pause(self) -> None:
@@ -159,11 +187,11 @@ class OpenCVVideoPlayer(tk.Frame):
         if panel_width > 1 and panel_height > 1:
             height, width = frame_rgb.shape[:2]
             scale = min(panel_width / width, panel_height / height)
-            if scale > 0:
+            if scale > 0 and abs(scale - 1.0) > 0.01:
                 frame_rgb = cv2.resize(
                     frame_rgb,
                     (max(1, int(width * scale)), max(1, int(height * scale))),
-                    interpolation=cv2.INTER_AREA,
+                    interpolation=cv2.INTER_LINEAR,
                 )
 
         image = Image.fromarray(frame_rgb)
@@ -173,6 +201,12 @@ class OpenCVVideoPlayer(tk.Frame):
 
     def update_frame(self) -> None:
         if not self.playing:
+            return
+
+        now = time.perf_counter()
+        if now < self._next_frame_deadline:
+            wait_ms = max(1, int((self._next_frame_deadline - now) * 1000))
+            self.after(wait_ms, self.update_frame)
             return
 
         ret, frame = self.cap.read()
@@ -189,8 +223,19 @@ class OpenCVVideoPlayer(tk.Frame):
             self._slider_internal_update = False
 
         self.on_time_update(current_time_ms / 1000.0)
-        delay = max(1, int(1000 / self.fps))
-        self.after(delay, self.update_frame)
+        self._next_frame_deadline += self.frame_interval_s
+
+        # Catch up if UI/rendering falls behind realtime.
+        now = time.perf_counter()
+        if now > (self._next_frame_deadline + self.frame_interval_s):
+            lag_s = now - self._next_frame_deadline
+            frames_to_drop = min(int(lag_s / self.frame_interval_s), int(self.playback_fps * 0.5))
+            for _ in range(frames_to_drop):
+                if not self.cap.grab():
+                    break
+            self._next_frame_deadline = now
+
+        self.after(1, self.update_frame)
 
     def on_slider(self, value: str) -> None:
         if self._slider_internal_update:
@@ -206,6 +251,7 @@ class OpenCVVideoPlayer(tk.Frame):
 
         new_time_ms = (val / 1000.0) * self.duration_ms
         self.cap.set(cv2.CAP_PROP_POS_MSEC, new_time_ms)
+        self._next_frame_deadline = time.perf_counter()
 
         ret, frame = self.cap.read()
         if ret:
@@ -215,15 +261,27 @@ class OpenCVVideoPlayer(tk.Frame):
 
 
 class MapPanel(tk.Frame):
-    def __init__(self, master: tk.Misc, coordinates: list[dict[str, float | str]]):
+    def __init__(
+        self,
+        master: tk.Misc,
+        coordinates: list[dict[str, float | str]],
+        follow_map: bool,
+        pan_interval_s: float,
+    ):
         super().__init__(master)
         self.coordinates = coordinates
+        self.follow_map = follow_map
+        self.pan_interval_s = pan_interval_s
+
+        self._last_pan_time = 0.0
+        self._last_pan_position: tuple[float, float] | None = None
 
         route = [
             (float(step["lat"]), float(step["lon"]))
             for step in coordinates
             if float(step["lat"]) != 0.0 and float(step["lon"]) != 0.0
         ]
+        route = downsample_route(route, max_points=1200)
 
         initial_lat = float(coordinates[0]["lat"])
         initial_lon = float(coordinates[0]["lon"])
@@ -237,6 +295,7 @@ class MapPanel(tk.Frame):
             self.map_widget.set_path(route)
 
         self.marker = self.map_widget.set_marker(initial_lat, initial_lon, text="Current position")
+        self._last_pan_position = (initial_lat, initial_lon)
 
         info = tk.Frame(self)
         info.grid(row=1, column=0, sticky="ew")
@@ -269,7 +328,16 @@ class MapPanel(tk.Frame):
         lon = float(coord["lon"])
 
         self.marker.set_position(lat, lon)
-        self.map_widget.set_position(lat, lon)
+
+        if self.follow_map:
+            now = time.perf_counter()
+            if now - self._last_pan_time >= self.pan_interval_s:
+                last_lat, last_lon = self._last_pan_position or (lat, lon)
+                moved = abs(lat - last_lat) + abs(lon - last_lon)
+                if moved >= 0.0002:
+                    self.map_widget.set_position(lat, lon)
+                    self._last_pan_position = (lat, lon)
+                    self._last_pan_time = now
 
         speed_mps = float(coord["speed"])
         speed_kmh = speed_mps * 3.6
@@ -289,57 +357,89 @@ class VideoMapApp(tk.Frame):
         video_start_epoch: float,
         coordinates: list[dict[str, float | str]],
         on_request_load_file,
+        map_update_ms: int,
+        follow_map: bool,
+        pan_interval_s: float,
+        max_fps: float | None,
     ):
         super().__init__(master)
         self.video_start_epoch = video_start_epoch
         self.coordinates = coordinates
+        self.coordinate_epochs = [float(coord["epoch"]) for coord in coordinates]
         self.current_epoch = video_start_epoch
+        self._last_map_idx: int | None = None
+        self.map_update_ms = max(100, map_update_ms)
 
         self.video_player = OpenCVVideoPlayer(
             self,
             video_path,
             on_time_update=self._on_video_time_update,
             on_load_file=on_request_load_file,
+            max_fps=max_fps,
         )
         self.video_player.grid(row=0, column=0, sticky="nsew")
 
-        self.map_panel = MapPanel(self, coordinates)
+        self.map_panel = MapPanel(self, coordinates, follow_map=follow_map, pan_interval_s=pan_interval_s)
         self.map_panel.grid(row=0, column=1, sticky="nsew")
 
         self.rowconfigure(0, weight=1)
         self.columnconfigure(0, weight=1)
         self.columnconfigure(1, weight=1)
 
-        self.after(250, self._update_map_marker)
+        self.after(self.map_update_ms, self._update_map_marker)
         self.video_player.play()
 
     def _on_video_time_update(self, current_seconds: float) -> None:
         self.current_epoch = self.video_start_epoch + current_seconds
 
-    def _nearest_coordinate(self) -> dict[str, float | str] | None:
-        nearest = None
-        smallest_diff = float("inf")
-        for coord in self.coordinates:
-            diff = abs(float(coord["epoch"]) - self.current_epoch)
-            if diff < smallest_diff:
-                smallest_diff = diff
-                nearest = coord
-        return nearest
+    def _nearest_coordinate(self) -> tuple[int, dict[str, float | str]] | None:
+        if not self.coordinates:
+            return None
+
+        idx = bisect.bisect_left(self.coordinate_epochs, self.current_epoch)
+        if idx <= 0:
+            return 0, self.coordinates[0]
+
+        if idx >= len(self.coordinate_epochs):
+            last_idx = len(self.coordinate_epochs) - 1
+            return last_idx, self.coordinates[last_idx]
+
+        before_idx = idx - 1
+        after_idx = idx
+        before_diff = abs(self.current_epoch - self.coordinate_epochs[before_idx])
+        after_diff = abs(self.coordinate_epochs[after_idx] - self.current_epoch)
+        best_idx = before_idx if before_diff <= after_diff else after_idx
+        return best_idx, self.coordinates[best_idx]
 
     def _update_map_marker(self) -> None:
-        coord = self._nearest_coordinate()
-        if coord is not None:
-            self.map_panel.update_location(coord)
-        self.after(250, self._update_map_marker)
+        nearest = self._nearest_coordinate()
+        if nearest is not None:
+            idx, coord = nearest
+            if idx != self._last_map_idx:
+                self.map_panel.update_location(coord)
+                self._last_map_idx = idx
+        self.after(self.map_update_ms, self._update_map_marker)
 
     def close(self) -> None:
         self.video_player.close()
 
 
 class DashcamViewer:
-    def __init__(self, initial_video: str | None, use_daylight_saving_time: bool):
+    def __init__(
+        self,
+        initial_video: str | None,
+        use_daylight_saving_time: bool,
+        map_update_ms: int,
+        follow_map: bool,
+        map_pan_interval_ms: int,
+        max_fps: float | None,
+    ):
         self.initial_video = initial_video
         self.use_daylight_saving_time = use_daylight_saving_time
+        self.map_update_ms = map_update_ms
+        self.follow_map = follow_map
+        self.map_pan_interval_s = max(0.1, map_pan_interval_ms / 1000.0)
+        self.max_fps = max_fps
 
         self.root = tk.Tk()
         self.root.title("Python Dashcam Player")
@@ -379,6 +479,10 @@ class DashcamViewer:
             video_start_epoch,
             coordinates,
             on_request_load_file=self.load_new_file,
+            map_update_ms=self.map_update_ms,
+            follow_map=self.follow_map,
+            pan_interval_s=self.map_pan_interval_s,
+            max_fps=self.max_fps,
         )
         self.app.grid(row=0, column=0, sticky="nsew")
 
@@ -426,14 +530,46 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         dest="use_daylight_saving_time",
         help="disable the one-hour DST adjustment when parsing creation time",
     )
+    parser.add_argument(
+        "--map-update-ms",
+        type=int,
+        default=350,
+        help="map marker refresh interval in milliseconds (default: 350)",
+    )
+    parser.add_argument(
+        "--map-pan-interval-ms",
+        type=int,
+        default=1000,
+        help="auto-center interval in milliseconds while following position (default: 1000)",
+    )
+    parser.add_argument(
+        "--no-map-follow",
+        action="store_false",
+        dest="follow_map",
+        help="do not auto-center the map while playback advances",
+    )
+    parser.add_argument(
+        "--max-fps",
+        type=float,
+        default=0.0,
+        help="cap playback/render FPS for smoother performance on slow machines (e.g. 30)",
+    )
     return parser.parse_args(argv)
 
 
 def main(argv: list[str] | None = None) -> int:
+    cv2.setUseOptimized(True)
+
     args = parse_args(argv)
+    max_fps = args.max_fps if args.max_fps > 0 else None
+
     viewer = DashcamViewer(
         initial_video=args.video,
         use_daylight_saving_time=args.use_daylight_saving_time,
+        map_update_ms=args.map_update_ms,
+        follow_map=args.follow_map,
+        map_pan_interval_ms=args.map_pan_interval_ms,
+        max_fps=max_fps,
     )
     if not viewer.bootstrap():
         return 1
