@@ -1,101 +1,78 @@
-# pyDashcamViewer
-Play dashcamvideos and show their gps position in realtime with python
-<br>
-<br>
-<img src="https://github.com/Cynobs-repo/pydashcamviewer/blob/main/pyDashcamview_image.png" width="600">
-<br><br>
+# pydashcamviewer
+
+Cross-platform dashcam MP4 viewer with synchronized GPS map playback.
+
+![pyDashcamViewer screenshot](pyDashcamview_image.png)
 
 > [!IMPORTANT]
-> Only works with **VIOFO A229 Plus** dashcam mp4 video files. 
-<br>
-Can also work with other Novatek based dashcams but its not tested until now.<br>
-If you have another type of (Viofo) dashcam, please try it out and post a comment. <br>
-If you have a completely different cam and it doesn't work you can send me a video file of it and I will extend the script.<br>
-<br>
-  
-✅ designed for windows (10/11) <br>
-✅ standalone package available - no install needed <br>
-✅ GPS position is displayed on openstreetmaps synchronized with the video file <br>
-<br>
-<br>
-## How to install and setup
+> This project is currently tested with **VIOFO A229 Plus** MP4 files.
+> It may also work with other Novatek-based dashcams, but compatibility is not guaranteed yet.
 
-### the lazy way
+## How to Use It
 
-Download all the pyDashcamplayer.7zip files and unzip them. 
-<br>
-Open the folder pyDashcamplayer and start the exe of the same name in it.
-<br>
+After installation, run the tool as `pydashcamviewer`.
 
-if your dashcam use daylight saving time the script will work correctly. 
-If you dont have this feature in your cam enabled open the file:
-<br>
-<br>
-pyDashcamViewer\python-3.6.8.amd64\pydashcam\run.py
-<br>
-<br>
-and change the line number 21
-```
-use_daylight_saving_time = True
-```
-to
-```
-use_daylight_saving_time = False
+Open the file picker and choose a video:
+
+```bash
+pydashcamviewer
 ```
 
-<br>
+Open a specific MP4 directly:
 
-### build it 
-
-> [!NOTE]
-> You will need Python 3.6 to run the code.
-<br>
-
-While we are on a Windows system we can use winpython. First we download the appropriate Winpython package: 
-https://sourceforge.net/projects/winpython/files/WinPython_3.6/3.6.8.0/WinPython64-3.6.8.0Zero.exe/download
-
-unzip/extract it somewhere you like.
-Open the WPy64-3680 folder and start the WinPython Command Prompt.exe
-
-in the Command prompt window type:
-```
-python.bat -m pip install --upgrade pip
+```bash
+pydashcamviewer /path/to/dashcam_clip.mp4
 ```
 
-to update the old pip package in winpython. If you do not do this, the installation of opencv will fail.
-then install needed packages with:
+Disable daylight-saving-time correction when parsing video timestamps:
+
+```bash
+pydashcamviewer --no-daylight-saving-time /path/to/dashcam_clip.mp4
 ```
-python.bat -m pip install opencv-python pillow folium cefpython3 pywin32
+
+Inside the app:
+
+- Left panel: video playback controls (play, pause, seek, load new file)
+- Right panel: live map marker synced to video time
+- Bottom info: speed, latitude/longitude, and GPS timestamp
+
+## Install
+
+Install as a [`uv` tool](https://docs.astral.sh/uv/) from this GitHub repo:
+
+```bash
+uv tool install git+https://github.com/hammerill/pydashcamviewer
 ```
 
-As soon as this is finished, copy the pydashcam folder and its contents to /WPy64-3680/python-3.6.8.amd64/
-The file run_VE.bat is copied to the /WPy64-3680/scripts folder.
+Or local dev install:
 
-Now you can execute the run_VE.bat script and pyDashcamviewer starts.
-<br>
-<br>
-
-If you want to build a exe file like in the aio package you can use autoit:
-AutoIt is a simple tool for creating .exe files. Download AutoIt and install it.
-https://www.autoitscript.com/site/autoit/downloads/
-<br>
-Create a file named pyDashcamViewer.au3 with the following content:
+```bash
+# in pydashcamviewer project folder
+uv tool install -e .
 ```
-Run(@ScriptDir & "\scripts\run_VE.bat", @ScriptDir, @SW_SHOW)
-````
-<br>
-Explanation:
-<br>
 
-> @ScriptDir returns the directory of the .exe file. <br>
-> Run(...) starts the batch file in the scripts subfolder.<br>
-<br><br>
+Then run it from anywhere:
 
-After the installation of AutoIt: <br>
+```bash
+pydashcamviewer
+```
 
-* Right-click on pyDashcamViewer.au3 <br>
-* Select Compile Script (x64) <br>
-* This will create a pyDashcamViewer.exe.<br>
-<br>
+## Local Development
 
-This pyDashcamViewer.exe can now be used to start the run_VE.bat in the scripts folder.
+Create/update the project environment:
+
+```bash
+uv sync
+```
+
+Run from source:
+
+```bash
+uv run pydashcamviewer --help
+```
+
+Build distributable artifacts (wheel + sdist):
+
+```bash
+uv build
+```

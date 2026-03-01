@@ -1,16 +1,39 @@
 [project]
 name = "pydashcamviewer"
 version = "0.1.0"
-description = "Play dashcamvideos and show their gps position in realtime, remade with help of uv"
+description = "Cross-platform dashcam MP4 viewer with synchronized GPS map playback."
 readme = "README.md"
 authors = [
     { name = "hammerill", email = "kyrylo@hammerill.com" }
 ]
-requires-python = ">=3.12"
-dependencies = []
+license = { text = "GPL-3.0-or-later" }
+requires-python = ">=3.10"
+keywords = ["dashcam", "gps", "mp4", "viewer", "tkinter", "opencv"]
+classifiers = [
+    "Development Status :: 4 - Beta",
+    "Intended Audience :: End Users/Desktop",
+    "License :: OSI Approved :: GNU General Public License v3 or later (GPLv3+)",
+    "Operating System :: OS Independent",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Topic :: Multimedia :: Video",
+    "Topic :: Scientific/Engineering :: GIS",
+]
+dependencies = [
+    "opencv-python>=4.13.0.92",
+    "pillow>=12.1.1",
+    "tkintermapview>=1.29",
+]
 
 [project.scripts]
-pydashcamviewer = "pydashcamviewer:main"
+pydashcamviewer = "pydashcamviewer.run:main"
+
+[project.urls]
+Homepage = "https://github.com/Cynobs-repo/pydashcamviewer"
+Repository = "https://github.com/Cynobs-repo/pydashcamviewer"
+Issues = "https://github.com/Cynobs-repo/pydashcamviewer/issues"
 
 [build-system]
 requires = ["uv_build>=0.9.13,<0.10.0"]
