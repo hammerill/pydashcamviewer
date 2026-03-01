@@ -50,29 +50,3 @@ Or local dev install:
 # in pydashcamviewer project folder
 uv tool install -e .
 ```
-
-Then run it from anywhere:
-
-```bash
-pydashcamviewer
-```
-
-## Local Development
-
-Create/update the project environment:
-
-```bash
-uv sync
-```
-
-Run from source:
-
-```bash
-uv run pydashcamviewer --help
-```
-
-Build distributable artifacts (wheel + sdist):
-
-```bash
-uv build
-```
