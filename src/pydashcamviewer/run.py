@@ -9,7 +9,7 @@ import datetime
 import struct
 import time
 import tkinter as tk
-from tkinter import filedialog, messagebox
+from tkinter import filedialog, messagebox, ttk
 
 import cv2
 from PIL import Image, ImageTk
@@ -299,26 +299,40 @@ class MapPanel(tk.Frame):
 
         info = tk.Frame(self)
         info.grid(row=1, column=0, sticky="ew")
+        info.columnconfigure(0, weight=1, uniform="status")
+        info.columnconfigure(1, weight=1, uniform="status")
+        info.columnconfigure(2, weight=1, uniform="status")
 
-        self.speed_kmh_var = tk.StringVar(value="0 km/h")
-        self.speed_mps_var = tk.StringVar(value="0 m/s")
-        self.lat_var = tk.StringVar(value=f"Lat.: {initial_lat}")
-        self.lon_var = tk.StringVar(value=f"Lon.: {initial_lon}")
-        self.time_var = tk.StringVar(value="-")
+        self.speed_kmh_var = tk.StringVar(value="  0.00 km/h")
+        self.speed_mps_var = tk.StringVar(value="  0.0000 m/s")
+        self.lat_var = tk.StringVar(value=f"Lat.: {initial_lat:+011.6f}")
+        self.lon_var = tk.StringVar(value=f"Lon.: {initial_lon:+011.6f}")
+        self.time_var = tk.StringVar(value="---- -- --T--:--:--Z")
+        fixed_label_cfg = {"anchor": "w", "width": 22, "font": "TkFixedFont"}
 
         speed_box = tk.LabelFrame(info, text="Speed")
         speed_box.grid(row=0, column=0, sticky="ew", padx=25, pady=5)
-        tk.Label(speed_box, textvariable=self.speed_kmh_var).grid(row=0, column=0, sticky="w", padx=15, pady=2)
-        tk.Label(speed_box, textvariable=self.speed_mps_var).grid(row=1, column=0, sticky="w", padx=15, pady=2)
+        speed_box.grid_propagate(False)
+        speed_box.configure(width=260, height=76)
+        tk.Label(speed_box, textvariable=self.speed_kmh_var, **fixed_label_cfg).grid(
+            row=0, column=0, sticky="w", padx=15, pady=2
+        )
+        tk.Label(speed_box, textvariable=self.speed_mps_var, **fixed_label_cfg).grid(
+            row=1, column=0, sticky="w", padx=15, pady=2
+        )
 
         gps_box = tk.LabelFrame(info, text="GPS Position")
         gps_box.grid(row=0, column=1, sticky="ew", padx=25, pady=5)
-        tk.Label(gps_box, textvariable=self.lat_var).grid(row=0, column=0, sticky="w", padx=15, pady=2)
-        tk.Label(gps_box, textvariable=self.lon_var).grid(row=1, column=0, sticky="w", padx=15, pady=2)
+        gps_box.grid_propagate(False)
+        gps_box.configure(width=260, height=76)
+        tk.Label(gps_box, textvariable=self.lat_var, **fixed_label_cfg).grid(row=0, column=0, sticky="w", padx=15, pady=2)
+        tk.Label(gps_box, textvariable=self.lon_var, **fixed_label_cfg).grid(row=1, column=0, sticky="w", padx=15, pady=2)
 
         time_box = tk.LabelFrame(info, text="GPS Timestamp")
         time_box.grid(row=0, column=2, sticky="ew", padx=25, pady=5)
-        tk.Label(time_box, textvariable=self.time_var).grid(row=0, column=0, sticky="w", padx=15, pady=2)
+        time_box.grid_propagate(False)
+        time_box.configure(width=260, height=76)
+        tk.Label(time_box, textvariable=self.time_var, **fixed_label_cfg).grid(row=0, column=0, sticky="w", padx=15, pady=2)
 
         self.rowconfigure(0, weight=1)
         self.columnconfigure(0, weight=1)
@@ -342,11 +356,11 @@ class MapPanel(tk.Frame):
         speed_mps = float(coord["speed"])
         speed_kmh = speed_mps * 3.6
 
-        self.speed_kmh_var.set(f"{speed_kmh:.2f} km/h")
-        self.speed_mps_var.set(f"{speed_mps:.4f} m/s")
-        self.lat_var.set(f"Lat.: {lat}")
-        self.lon_var.set(f"Lon.: {lon}")
-        self.time_var.set(str(coord["date"]))
+        self.speed_kmh_var.set(f"{speed_kmh:7.2f} km/h")
+        self.speed_mps_var.set(f"{speed_mps:8.4f} m/s")
+        self.lat_var.set(f"Lat.: {lat:+011.6f}")
+        self.lon_var.set(f"Lon.: {lon:+011.6f}")
+        self.time_var.set(f"{str(coord['date'])[:20]:<20}")
 
 
 class VideoMapApp(tk.Frame):
@@ -369,9 +383,24 @@ class VideoMapApp(tk.Frame):
         self.current_epoch = video_start_epoch
         self._last_map_idx: int | None = None
         self.map_update_ms = max(100, map_update_ms)
+        self._sash_initialized = False
+
+        self.panes = ttk.Panedwindow(self, orient=tk.HORIZONTAL)
+        self.panes.grid(row=0, column=0, sticky="nsew")
+
+        self.video_pane = tk.Frame(self.panes)
+        self.map_pane = tk.Frame(self.panes)
+        self.video_pane.rowconfigure(0, weight=1)
+        self.video_pane.columnconfigure(0, weight=1)
+        self.map_pane.rowconfigure(0, weight=1)
+        self.map_pane.columnconfigure(0, weight=1)
+
+        self.panes.add(self.video_pane, weight=1)
+        self.panes.add(self.map_pane, weight=1)
+        self.panes.bind("<Configure>", self._initialize_sash, add="+")
 
         self.video_player = OpenCVVideoPlayer(
-            self,
+            self.video_pane,
             video_path,
             on_time_update=self._on_video_time_update,
             on_load_file=on_request_load_file,
@@ -379,15 +408,23 @@ class VideoMapApp(tk.Frame):
         )
         self.video_player.grid(row=0, column=0, sticky="nsew")
 
-        self.map_panel = MapPanel(self, coordinates, follow_map=follow_map, pan_interval_s=pan_interval_s)
-        self.map_panel.grid(row=0, column=1, sticky="nsew")
+        self.map_panel = MapPanel(self.map_pane, coordinates, follow_map=follow_map, pan_interval_s=pan_interval_s)
+        self.map_panel.grid(row=0, column=0, sticky="nsew")
 
         self.rowconfigure(0, weight=1)
         self.columnconfigure(0, weight=1)
-        self.columnconfigure(1, weight=1)
 
         self.after(self.map_update_ms, self._update_map_marker)
         self.video_player.play()
+
+    def _initialize_sash(self, _event=None) -> None:
+        if self._sash_initialized:
+            return
+        width = self.panes.winfo_width()
+        if width <= 2:
+            return
+        self.panes.sashpos(0, width // 2)
+        self._sash_initialized = True
 
     def _on_video_time_update(self, current_seconds: float) -> None:
         self.current_epoch = self.video_start_epoch + current_seconds
