@@ -38,7 +38,7 @@ Inside the app:
 
 ## Install
 
-Install as a [`uv` tool](https://docs.astral.sh/uv/) from this GitHub repo:
+Install as a [uv tool](https://docs.astral.sh/uv/) from this GitHub repo:
 
 ```bash
 uv tool install git+https://github.com/hammerill/pydashcamviewer
